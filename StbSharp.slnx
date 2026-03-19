@@ -1,0 +1,31 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Release" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="LICENSE.txt" />
+    <File Path="README.md" />
+    <File Path="SpellingExclusions.dic" />
+  </Folder>
+  <Folder Name="/Native/">
+    <File Path="src/StbSharp.Native/build.zig" />
+    <File Path="src/StbSharp.Native/include/stb_image.h" />
+    <File Path="src/StbSharp.Native/include/stb_image_write.h" />
+    <File Path="src/StbSharp.Native/src/stb_image_module.c" />
+    <File Path="src/StbSharp.Native/src/stb_image_write_module.c" />
+  </Folder>
+  <Project Path="src/StbSharp/StbSharp.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="tests/StbSharp.Tests/StbSharp.Tests.csproj">
+    <Platform Project="x64" />
+  </Project>
+</Solution>
+

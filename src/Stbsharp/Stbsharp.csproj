@@ -1,1 +1,104 @@
-﻿<Project Sdk="Microsoft.NET.Sdk" />
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>StbSharp</AssemblyName>
+    <RootNamespace>StbSharp</RootNamespace>
+    <PackageId>StbSharp</PackageId>
+    <Description>Managed packaging for stb_image/stb_image_write with x64 native assets for Windows, Linux, and macOS.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Platforms>x64</Platforms>
+    <Platform>x64</Platform>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <StbSharpRootDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../..'))</StbSharpRootDir>
+    <StbSharpNativeProjectDir>$(StbSharpRootDir)/src/StbSharp.Native</StbSharpNativeProjectDir>
+    <StbSharpNativeArtifactsDir>$(StbSharpRootDir)/artifacts/native</StbSharpNativeArtifactsDir>
+    <ZigExe Condition="'$(ZigExe)' == '' and '$(ZIG_EXE)' != ''">$(ZIG_EXE)</ZigExe>
+    <ZigExe Condition="'$(ZigExe)' == ''">zig</ZigExe>
+    <StbSharpHostRuntimeId Condition="$([MSBuild]::IsOsPlatform('Windows'))">win-x64</StbSharpHostRuntimeId>
+    <StbSharpHostRuntimeId Condition="'$(StbSharpHostRuntimeId)' == '' and $([MSBuild]::IsOsPlatform('Linux'))">linux-x64</StbSharpHostRuntimeId>
+    <StbSharpHostRuntimeId Condition="'$(StbSharpHostRuntimeId)' == '' and $([MSBuild]::IsOsPlatform('OSX'))">osx-x64</StbSharpHostRuntimeId>
+    <StbSharpBuildRuntimeId Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</StbSharpBuildRuntimeId>
+    <StbSharpBuildRuntimeId Condition="'$(StbSharpBuildRuntimeId)' == ''">$(StbSharpHostRuntimeId)</StbSharpBuildRuntimeId>
+    <StbSharpZigEnvironment>ZIG_EXE=$(ZigExe);ZIG_GLOBAL_CACHE_DIR=$(StbSharpRootDir)/.zig-cache-global;ZIG_LOCAL_CACHE_DIR=$(StbSharpRootDir)/.zig-cache</StbSharpZigEnvironment>
+    <StbSharpZigOptimizationMode Condition="'$(Configuration)' == 'Debug'">Debug</StbSharpZigOptimizationMode>
+    <StbSharpZigOptimizationMode Condition="'$(StbSharpZigOptimizationMode)' == ''">ReleaseFast</StbSharpZigOptimizationMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <StbSharpNativeRuntime Include="$(StbSharpNativeArtifactsDir)/win-x64/$(Configuration)/stb_image.dll">
+      <RuntimeId>win-x64</RuntimeId>
+      <OutputDir>$(StbSharpNativeArtifactsDir)/win-x64/$(Configuration)</OutputDir>
+      <ZigTarget>x86_64-windows-gnu</ZigTarget>
+    </StbSharpNativeRuntime>
+    <StbSharpNativeRuntime Include="$(StbSharpNativeArtifactsDir)/linux-x64/$(Configuration)/libstb_image.so">
+      <RuntimeId>linux-x64</RuntimeId>
+      <OutputDir>$(StbSharpNativeArtifactsDir)/linux-x64/$(Configuration)</OutputDir>
+      <ZigTarget>x86_64-linux-gnu</ZigTarget>
+    </StbSharpNativeRuntime>
+    <StbSharpNativeRuntime Include="$(StbSharpNativeArtifactsDir)/osx-x64/$(Configuration)/libstb_image.dylib">
+      <RuntimeId>osx-x64</RuntimeId>
+      <OutputDir>$(StbSharpNativeArtifactsDir)/osx-x64/$(Configuration)</OutputDir>
+      <ZigTarget>x86_64-macos</ZigTarget>
+    </StbSharpNativeRuntime>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(StbSharpRootDir)/README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="buildTransitive\StbSharp.targets" Pack="true" PackagePath="buildTransitive\StbSharp.targets" />
+    <None Include="$(StbSharpNativeArtifactsDir)/win-x64/$(Configuration)/stb_image.dll" Pack="true" PackagePath="runtimes/win-x64/native/" Visible="false" />
+    <None Include="$(StbSharpNativeArtifactsDir)/linux-x64/$(Configuration)/libstb_image.so" Pack="true" PackagePath="runtimes/linux-x64/native/" Visible="false" />
+    <None Include="$(StbSharpNativeArtifactsDir)/osx-x64/$(Configuration)/libstb_image.dylib" Pack="true" PackagePath="runtimes/osx-x64/native/" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotNext.IO" />
+    <PackageReference Include="DotNext.Unsafe" />
+  </ItemGroup>
+
+  <Target Name="ResolveBuildNativeRuntime">
+    <ItemGroup>
+      <StbSharpBuildNativeRuntime Remove="@(StbSharpBuildNativeRuntime)" />
+      <StbSharpBuildNativeRuntime Include="@(StbSharpNativeRuntime)" Condition="'%(RuntimeId)' == '$(StbSharpBuildRuntimeId)'" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="ValidateStbSharpConfiguration" BeforeTargets="PrepareForBuild;GenerateNuspec" DependsOnTargets="ResolveBuildNativeRuntime">
+    <Error Condition="'$(Platform)' != '' and '$(Platform)' != 'x64'" Text="StbSharp only supports x64 builds. Set Platform=x64." />
+    <Error Condition="'$(PlatformTarget)' != '' and '$(PlatformTarget)' != 'x64'" Text="StbSharp only supports x64 builds. Set PlatformTarget=x64." />
+    <Error Condition="'$(RuntimeIdentifier)' != '' and '$(RuntimeIdentifier)' != 'win-x64' and '$(RuntimeIdentifier)' != 'linux-x64' and '$(RuntimeIdentifier)' != 'osx-x64'" Text="StbSharp only supports win-x64, linux-x64, and osx-x64 runtime identifiers." />
+    <Error Condition="'$(StbSharpBuildRuntimeId)' == ''" Text="StbSharp could not resolve a supported x64 runtime identifier for the native stb_image library." />
+    <Error Condition="'@(StbSharpBuildNativeRuntime)' == '' or '@(StbSharpBuildNativeRuntime->'%(ZigTarget)')' == ''" Text="StbSharp could not resolve a supported x64 Zig target for the native stb_image library." />
+  </Target>
+
+  <Target Name="ValidateHostBuildRuntime" BeforeTargets="Build" DependsOnTargets="ResolveBuildNativeRuntime" Condition="'$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true'">
+    <Error Condition="'$(RuntimeIdentifier)' != '' and '$(RuntimeIdentifier)' != '$(StbSharpHostRuntimeId)'" Text="StbSharp build only produces the host-native asset ($(StbSharpHostRuntimeId)). Use dotnet pack to bundle all runtimes." />
+  </Target>
+
+  <Target Name="ValidateZigTooling" DependsOnTargets="ValidateStbSharpConfiguration">
+    <MakeDir Directories="$(StbSharpRootDir)/.zig-cache;$(StbSharpRootDir)/.zig-cache-global" />
+    <Exec Command="&quot;$(ZigExe)&quot; version" WorkingDirectory="$(StbSharpNativeProjectDir)" EnvironmentVariables="$(StbSharpZigEnvironment)" IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="StbSharpZigVersionExitCode" />
+    </Exec>
+    <Error Condition="'$(StbSharpZigVersionExitCode)' != '0'" Text="StbSharp requires zig on PATH or ZIG_EXE set to a Zig executable." />
+  </Target>
+
+  <Target Name="BuildCurrentNativeAsset" AfterTargets="Build" DependsOnTargets="ValidateZigTooling" Condition="'$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true'">
+    <MakeDir Directories="@(StbSharpBuildNativeRuntime->'%(OutputDir)')" />
+    <Exec Command="&quot;$(ZigExe)&quot; build --prefix &quot;@(StbSharpBuildNativeRuntime->'%(OutputDir)')&quot; -Dtarget=@(StbSharpBuildNativeRuntime->'%(ZigTarget)') -Doptimize=$(StbSharpZigOptimizationMode)" WorkingDirectory="$(StbSharpNativeProjectDir)" EnvironmentVariables="$(StbSharpZigEnvironment)" />
+    <Copy SourceFiles="@(StbSharpBuildNativeRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="AddNativeLibraryToCopyItemsForReferencingProjects" BeforeTargets="GetCopyToOutputDirectoryItems;_GetCopyToOutputDirectoryItemsFromThisProject" DependsOnTargets="ResolveBuildNativeRuntime" Condition="'$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '@(StbSharpBuildNativeRuntime)' != '' and Exists('@(StbSharpBuildNativeRuntime)')">
+    <ItemGroup>
+      <AllItemsFullPathWithTargetPath Include="@(StbSharpBuildNativeRuntime)" TargetPath="@(StbSharpBuildNativeRuntime->'%(Filename)%(Extension)')" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="BuildPackageNativeAssets" BeforeTargets="GenerateNuspec" DependsOnTargets="ValidateZigTooling">
+    <MakeDir Directories="@(StbSharpNativeRuntime->'%(OutputDir)')" />
+    <Exec Command="&quot;$(ZigExe)&quot; build --prefix &quot;%(StbSharpNativeRuntime.OutputDir)&quot; -Dtarget=%(StbSharpNativeRuntime.ZigTarget) -Doptimize=$(StbSharpZigOptimizationMode)" WorkingDirectory="$(StbSharpNativeProjectDir)" EnvironmentVariables="$(StbSharpZigEnvironment)" />
+  </Target>
+
+</Project>

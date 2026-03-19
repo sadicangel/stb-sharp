@@ -1,0 +1,49 @@
+$version = "2.14.1"
+$packageId = "Humanizer.Core"
+
+$pkgRoot = Join-Path $env:TEMP "humanizer"
+$nupkgPath = Join-Path $pkgRoot "$packageId.$version.nupkg"
+$extractPath = Join-Path $pkgRoot "$packageId.$version"
+
+if (-not (Test-Path $extractPath)) {
+    New-Item -ItemType Directory -Path $pkgRoot -Force | Out-Null
+
+    if (-not (Test-Path $nupkgPath)) {
+        Invoke-WebRequest `
+            -Uri "https://www.nuget.org/api/v2/package/$packageId/$version" `
+            -OutFile $nupkgPath
+    }
+
+    Expand-Archive -Path $nupkgPath -DestinationPath $extractPath -Force
+}
+
+$dllPath = Get-ChildItem -Path $extractPath -Recurse -Filter Humanizer.dll |
+Select-Object -First 1 -ExpandProperty FullName
+
+if (-not $dllPath) {
+    throw "Could not find Humanizer.dll under '$extractPath'."
+}
+
+if (-not ("Humanizer.InflectorExtensions" -as [type])) {
+    Add-Type -Path $dllPath
+}
+
+$inputFolder = Join-Path (Split-Path $PSCommandPath) "../src/StbSharp.Native/include"
+$outputFolder = Join-Path (Split-Path $PSCommandPath) "../src/StbSharp/Interop"
+
+Get-ChildItem $inputFolder | ForEach-Object {
+    $className = [Humanizer.InflectorExtensions]::Pascalize([System.IO.Path]::GetFileNameWithoutExtension($_.Name))
+    $targetPath = Join-Path $outputFolder ([System.IO.Path]::ChangeExtension($className, ".cs"))
+
+    Write-Host "Generating code for $($_.FullName) to $targetPath => $className"
+    & ClangSharpPInvokeGenerator `
+        -c "latest-codegen" `
+        -was *=Internal `
+        -f $_.FullName `
+        -l "stb_image" `
+        -m $className `
+        -n "StbSharp.Interop" `
+        -o $targetPath `
+        -r "_iobuf*=nint" `
+        -r "char *=byte*" `
+}
