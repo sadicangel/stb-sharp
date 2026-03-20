@@ -17,8 +17,10 @@
   <Folder Name="/Native/">
     <File Path="src/StbSharp.Native/build.zig" />
     <File Path="src/StbSharp.Native/include/stb_image.h" />
+    <File Path="src/StbSharp.Native/include/stb_image_resize2.h" />
     <File Path="src/StbSharp.Native/include/stb_image_write.h" />
     <File Path="src/StbSharp.Native/src/stb_image_module.c" />
+    <File Path="src/StbSharp.Native/src/stb_image_resize2_module.c" />
     <File Path="src/StbSharp.Native/src/stb_image_write_module.c" />
   </Folder>
   <Project Path="src/StbSharp/StbSharp.csproj">
