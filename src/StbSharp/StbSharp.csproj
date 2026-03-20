@@ -84,13 +84,13 @@
     <Error Condition="'$(StbSharpZigVersionExitCode)' != '0'" Text="StbSharp requires zig on PATH or ZIG_EXE set to a Zig executable." />
   </Target>
 
-  <Target Name="BuildCurrentNativeAsset" AfterTargets="Build" DependsOnTargets="ValidateZigTooling" Condition="'$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true'">
+  <Target Name="BuildCurrentNativeAsset" BeforeTargets="GetCopyToOutputDirectoryItems;_GetCopyToOutputDirectoryItemsFromThisProject;Build" DependsOnTargets="ValidateZigTooling" Condition="'$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true'">
     <MakeDir Directories="@(StbSharpBuildNativeRuntime->'%(OutputDir)')" />
     <Exec Command="&quot;$(ZigExe)&quot; build --prefix &quot;@(StbSharpBuildNativeRuntime->'%(OutputDir)')&quot; -Dtarget=@(StbSharpBuildNativeRuntime->'%(ZigTarget)') -Doptimize=$(StbSharpZigOptimizationMode)" WorkingDirectory="$(StbSharpNativeProjectDir)" EnvironmentVariables="$(StbSharpZigEnvironment)" />
     <Copy SourceFiles="@(StbSharpBuildNativeRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="AddNativeLibraryToCopyItemsForReferencingProjects" BeforeTargets="GetCopyToOutputDirectoryItems;_GetCopyToOutputDirectoryItemsFromThisProject" DependsOnTargets="ResolveBuildNativeRuntime" Condition="'$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '@(StbSharpBuildNativeRuntime)' != '' and Exists('@(StbSharpBuildNativeRuntime)')">
+  <Target Name="AddNativeLibraryToCopyItemsForReferencingProjects" BeforeTargets="GetCopyToOutputDirectoryItems;_GetCopyToOutputDirectoryItemsFromThisProject" DependsOnTargets="BuildCurrentNativeAsset" Condition="'$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '@(StbSharpBuildNativeRuntime)' != '' and Exists('@(StbSharpBuildNativeRuntime)')">
     <ItemGroup>
       <AllItemsFullPathWithTargetPath Include="@(StbSharpBuildNativeRuntime)" TargetPath="@(StbSharpBuildNativeRuntime->'%(Filename)%(Extension)')" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
