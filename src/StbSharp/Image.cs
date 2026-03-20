@@ -1,10 +1,13 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using StbSharp.Interop;
 
 namespace StbSharp;
 
 public sealed class Image : IDisposable
 {
+    private const float HdrGamma = 2.2f;
+    private const float ByteScale = 1f / byte.MaxValue;
     private unsafe void* _pixels;
     private readonly bool _isStbPointer;
     public int Width { get; }
@@ -102,7 +105,7 @@ public sealed class Image : IDisposable
         }
     }
 
-    public void SaveAsPng(string fileName, int stride = 4)
+    public void SaveAsPng(string fileName, int stride = 0)
     {
         unsafe { SaveAs(fileName, _pixels, ImageFormat.Png, Width, Height, Components, stride); }
     }
@@ -137,24 +140,162 @@ public sealed class Image : IDisposable
         int width,
         int height,
         PixelComponents components,
-        int stride = 4,
+        int stride = 0,
         int quality = 50)
     {
         using var fileNameCString = fileName.ToCString();
-        int result;
         fixed (byte* pUtf8 = fileNameCString.Span)
-            result = format switch
-            {
-                ImageFormat.Png => StbImageWrite.stbi_write_png(pUtf8, width, height, components.Count, pixels, stride),
-                ImageFormat.Bmp => StbImageWrite.stbi_write_bmp(pUtf8, width, height, components.Count, pixels),
-                ImageFormat.Tga => StbImageWrite.stbi_write_tga(pUtf8, width, height, components.Count, pixels),
-                ImageFormat.Hdr => StbImageWrite.stbi_write_hdr(pUtf8, width, height, components.Count, (float*)pixels),
-                ImageFormat.Jpg => StbImageWrite.stbi_write_jpg(pUtf8, width, height, components.Count, pixels, quality),
-                _ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
-            };
-        if (result == 0)
         {
-            throw new InvalidOperationException("Failed to save");
+            int result;
+
+            switch (format)
+            {
+                case ImageFormat.Png:
+                    result = StbImageWrite.stbi_write_png(pUtf8, width, height, components.Count, pixels, GetPngStride(width, components, stride));
+                    break;
+                case ImageFormat.Bmp:
+                    result = StbImageWrite.stbi_write_bmp(pUtf8, width, height, components.Count, pixels);
+                    break;
+                case ImageFormat.Tga:
+                    result = StbImageWrite.stbi_write_tga(pUtf8, width, height, components.Count, pixels);
+                    break;
+                case ImageFormat.Hdr:
+                    {
+                        var hdrPixels = ConvertToHdrPixels(pixels, width, height, components);
+                        fixed (float* pHdrPixels = hdrPixels)
+                            result = StbImageWrite.stbi_write_hdr(pUtf8, width, height, components.Count, pHdrPixels);
+
+                        break;
+                    }
+                case ImageFormat.Jpg:
+                    result = StbImageWrite.stbi_write_jpg(pUtf8, width, height, components.Count, pixels, quality);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(format), format, null);
+            }
+
+            if (result == 0)
+            {
+                throw new InvalidOperationException("Failed to save");
+            }
         }
+    }
+
+    public void SaveAsPng(Stream stream, int stride = 0)
+    {
+        unsafe { SaveAs(stream, _pixels, ImageFormat.Png, Width, Height, Components, stride); }
+    }
+
+
+    public void SaveAsBmp(Stream stream)
+    {
+        unsafe { SaveAs(stream, _pixels, ImageFormat.Bmp, Width, Height, Components); }
+    }
+
+
+    public void SaveAsTga(Stream stream)
+    {
+        unsafe { SaveAs(stream, _pixels, ImageFormat.Tga, Width, Height, Components); }
+    }
+
+
+    public void SaveAsHdr(Stream stream)
+    {
+        unsafe { SaveAs(stream, _pixels, ImageFormat.Hdr, Width, Height, Components); }
+    }
+
+    public void SaveAsJpg(Stream stream, int quality = 50)
+    {
+        unsafe { SaveAs(stream, _pixels, ImageFormat.Jpg, Width, Height, Components, quality: quality); }
+    }
+
+    private static unsafe void SaveAs(
+        Stream stream,
+        void* pixels,
+        ImageFormat format,
+        int width,
+        int height,
+        PixelComponents components,
+        int stride = 0,
+        int quality = 50)
+    {
+        var handle = GCHandle.Alloc(stream);
+        try
+        {
+            int result;
+
+            switch (format)
+            {
+                case ImageFormat.Png:
+                    result = StbImageWrite.stbi_write_png_to_func(&Write, (void*)GCHandle.ToIntPtr(handle), width, height, components.Count, pixels, GetPngStride(width, components, stride));
+                    break;
+                case ImageFormat.Bmp:
+                    result = StbImageWrite.stbi_write_bmp_to_func(&Write, (void*)GCHandle.ToIntPtr(handle), width, height, components.Count, pixels);
+                    break;
+                case ImageFormat.Tga:
+                    result = StbImageWrite.stbi_write_tga_to_func(&Write, (void*)GCHandle.ToIntPtr(handle), width, height, components.Count, pixels);
+                    break;
+                case ImageFormat.Hdr:
+                    {
+                        var hdrPixels = ConvertToHdrPixels(pixels, width, height, components);
+                        fixed (float* pHdrPixels = hdrPixels)
+                            result = StbImageWrite.stbi_write_hdr_to_func(&Write, (void*)GCHandle.ToIntPtr(handle), width, height, components.Count, pHdrPixels);
+
+                        break;
+                    }
+                case ImageFormat.Jpg:
+                    result = StbImageWrite.stbi_write_jpg_to_func(&Write, (void*)GCHandle.ToIntPtr(handle), width, height, components.Count, pixels, quality);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(format), format, null);
+            }
+
+            if (result == 0)
+            {
+                throw new InvalidOperationException("Failed to save");
+            }
+        }
+        finally
+        {
+            handle.Free();
+        }
+
+
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+        static void Write(void* context, void* buffer, int count)
+        {
+            var handle = GCHandle.FromIntPtr((nint)context);
+            var stream = (Stream?)handle.Target ?? throw new ArgumentNullException(nameof(context));
+            stream.Write(new ReadOnlySpan<byte>(buffer, count));
+        }
+    }
+
+    private static int GetPngStride(int width, PixelComponents components, int stride) =>
+        stride == 0 ? checked(width * components.Count) : stride;
+
+    private static unsafe float[] ConvertToHdrPixels(void* pixels, int width, int height, PixelComponents components)
+    {
+        var componentCount = components.Count;
+        var pixelCount = checked(width * height * componentCount);
+        var hdrPixels = GC.AllocateUninitializedArray<float>(pixelCount);
+        var ldrPixels = new ReadOnlySpan<byte>(pixels, pixelCount);
+        var nonAlphaComponentCount = (componentCount & 1) == 1 ? componentCount : componentCount - 1;
+
+        for (var pixelIndex = 0; pixelIndex < pixelCount; pixelIndex += componentCount)
+        {
+            for (var componentIndex = 0; componentIndex < nonAlphaComponentCount; componentIndex++)
+            {
+                hdrPixels[pixelIndex + componentIndex] =
+                    MathF.Pow(ldrPixels[pixelIndex + componentIndex] * ByteScale, HdrGamma);
+            }
+
+            if (nonAlphaComponentCount < componentCount)
+            {
+                hdrPixels[pixelIndex + nonAlphaComponentCount] =
+                    ldrPixels[pixelIndex + nonAlphaComponentCount] * ByteScale;
+            }
+        }
+
+        return hdrPixels;
     }
 }
