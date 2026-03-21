@@ -1,5 +1,7 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using DotNext.Buffers;
+using DotNext.Runtime.InteropServices;
 using StbSharp.Interop;
 
 namespace StbSharp;
@@ -8,22 +10,13 @@ public sealed class Image : IDisposable
 {
     private const float HdrGamma = 2.2f;
     private const float ByteScale = 1f / byte.MaxValue;
-    private unsafe void* _pixels;
-    private readonly bool _isStbPointer;
+
+    private readonly IUnmanagedMemory<byte> _memory;
+
     public int Width { get; }
     public int Height { get; }
     public PixelComponents Components { get; }
-
-    public Span<byte> Pixels
-    {
-        get
-        {
-            unsafe
-            {
-                return new Span<byte>(_pixels, Width * Height * Components.Count);
-            }
-        }
-    }
+    public Span<byte> Pixels => _memory.Span;
 
     public Image(string fileName)
     {
@@ -31,15 +24,17 @@ public sealed class Image : IDisposable
         unsafe
         {
             using var fileNameCString = fileName.ToCString();
-            fixed (byte* pUtf8 = fileNameCString.Span)
-                _pixels = StbImage.stbi_load(pUtf8, &x, &y, &c, 0);
-            if (_pixels is null) throw new ArgumentException("Invalid file");
+            fixed (byte* pUtf8 = fileNameCString)
+            {
+                var pixels = StbImage.stbi_load(pUtf8, &x, &y, &c, 0);
+                if (pixels is null) throw new ArgumentException("Invalid file");
+                _memory = new StbImageUnmanagedMemory(pixels, x * y * c);
+            }
         }
 
         Width = x;
         Height = y;
         Components = (PixelComponents)c;
-        _isStbPointer = true;
     }
 
     public Image(Stream stream)
@@ -51,8 +46,9 @@ public sealed class Image : IDisposable
             try
             {
                 var callbacks = stbi_io_callbacks.Create();
-                _pixels = StbImage.stbi_load_from_callbacks(&callbacks, (void*)GCHandle.ToIntPtr(handle), &x, &y, &c, 0);
-                if (_pixels is null) throw new ArgumentException("Invalid file");
+                var pixels = StbImage.stbi_load_from_callbacks(&callbacks, (void*)GCHandle.ToIntPtr(handle), &x, &y, &c, 0);
+                if (pixels is null) throw new ArgumentException("Invalid file");
+                _memory = new StbImageUnmanagedMemory(pixels, x * y * c);
             }
             finally
             {
@@ -63,7 +59,6 @@ public sealed class Image : IDisposable
         Width = x;
         Height = y;
         Components = (PixelComponents)c;
-        _isStbPointer = true;
     }
 
     public Image(ReadOnlySpan<byte> buffer)
@@ -72,70 +67,37 @@ public sealed class Image : IDisposable
         unsafe
         {
             fixed (byte* ptr = buffer)
-                _pixels = StbImage.stbi_load_from_memory(ptr, buffer.Length, &x, &y, &c, 0);
-            if (_pixels is null) throw new ArgumentException("Invalid file");
+            {
+                var pixels = StbImage.stbi_load_from_memory(ptr, buffer.Length, &x, &y, &c, 0);
+                if (pixels is null) throw new ArgumentException("Invalid file");
+                _memory = new StbImageUnmanagedMemory(pixels, x * y * c);
+            }
         }
 
         Width = x;
         Height = y;
         Components = (PixelComponents)c;
-        _isStbPointer = true;
     }
 
     public Image(int width, int height, PixelComponents components)
     {
-        unsafe
-        {
-            _pixels = (byte*)NativeMemory.Alloc((nuint)(width * height), (nuint)components);
-            Width = width;
-            Height = height;
-            Components = components;
-            _isStbPointer = false;
-        }
+        _memory = UnmanagedMemory.Allocate<byte>(width * height * components.Count);
+        Width = width;
+        Height = height;
+        Components = components;
     }
 
-    public void Dispose()
-    {
-        unsafe
-        {
-            if (_isStbPointer) StbImage.stbi_image_free(_pixels);
-            else NativeMemory.Free(_pixels);
+    public void Dispose() => _memory.Dispose();
 
-            _pixels = null;
-        }
-    }
-
-    public void SaveAsPng(string fileName, int stride = 0)
-    {
-        unsafe { SaveAs(fileName, _pixels, ImageFormat.Png, Width, Height, Components, stride); }
-    }
-
-
-    public void SaveAsBmp(string fileName)
-    {
-        unsafe { SaveAs(fileName, _pixels, ImageFormat.Bmp, Width, Height, Components); }
-    }
-
-
-    public void SaveAsTga(string fileName)
-    {
-        unsafe { SaveAs(fileName, _pixels, ImageFormat.Tga, Width, Height, Components); }
-    }
-
-
-    public void SaveAsHdr(string fileName)
-    {
-        unsafe { SaveAs(fileName, _pixels, ImageFormat.Hdr, Width, Height, Components); }
-    }
-
-    public void SaveAsJpg(string fileName, int quality = 50)
-    {
-        unsafe { SaveAs(fileName, _pixels, ImageFormat.Jpg, Width, Height, Components, quality: quality); }
-    }
+    public void SaveAsPng(string fileName, int stride = 0) => SaveAs(fileName, _memory, ImageFormat.Png, Width, Height, Components, stride);
+    public void SaveAsBmp(string fileName) => SaveAs(fileName, _memory, ImageFormat.Bmp, Width, Height, Components);
+    public void SaveAsTga(string fileName) => SaveAs(fileName, _memory, ImageFormat.Tga, Width, Height, Components);
+    public void SaveAsHdr(string fileName) => SaveAs(fileName, _memory, ImageFormat.Hdr, Width, Height, Components);
+    public void SaveAsJpg(string fileName, int quality = 50) => SaveAs(fileName, _memory, ImageFormat.Jpg, Width, Height, Components, quality: quality);
 
     private static unsafe void SaveAs(
         string fileName,
-        void* pixels,
+        IUnmanagedMemory memory,
         ImageFormat format,
         int width,
         int height,
@@ -147,6 +109,7 @@ public sealed class Image : IDisposable
         fixed (byte* pUtf8 = fileNameCString.Span)
         {
             int result;
+            var pixels = (void*)memory.Pointer.Address;
 
             switch (format)
             {
@@ -181,37 +144,15 @@ public sealed class Image : IDisposable
         }
     }
 
-    public void SaveAsPng(Stream stream, int stride = 0)
-    {
-        unsafe { SaveAs(stream, _pixels, ImageFormat.Png, Width, Height, Components, stride); }
-    }
-
-
-    public void SaveAsBmp(Stream stream)
-    {
-        unsafe { SaveAs(stream, _pixels, ImageFormat.Bmp, Width, Height, Components); }
-    }
-
-
-    public void SaveAsTga(Stream stream)
-    {
-        unsafe { SaveAs(stream, _pixels, ImageFormat.Tga, Width, Height, Components); }
-    }
-
-
-    public void SaveAsHdr(Stream stream)
-    {
-        unsafe { SaveAs(stream, _pixels, ImageFormat.Hdr, Width, Height, Components); }
-    }
-
-    public void SaveAsJpg(Stream stream, int quality = 50)
-    {
-        unsafe { SaveAs(stream, _pixels, ImageFormat.Jpg, Width, Height, Components, quality: quality); }
-    }
+    public void SaveAsPng(Stream stream, int stride = 0) => SaveAs(stream, _memory, ImageFormat.Png, Width, Height, Components, stride);
+    public void SaveAsBmp(Stream stream) => SaveAs(stream, _memory, ImageFormat.Bmp, Width, Height, Components);
+    public void SaveAsTga(Stream stream) => SaveAs(stream, _memory, ImageFormat.Tga, Width, Height, Components);
+    public void SaveAsHdr(Stream stream) => SaveAs(stream, _memory, ImageFormat.Hdr, Width, Height, Components);
+    public void SaveAsJpg(Stream stream, int quality = 50) => SaveAs(stream, _memory, ImageFormat.Jpg, Width, Height, Components, quality: quality);
 
     private static unsafe void SaveAs(
         Stream stream,
-        void* pixels,
+        IUnmanagedMemory memory,
         ImageFormat format,
         int width,
         int height,
@@ -223,6 +164,7 @@ public sealed class Image : IDisposable
         try
         {
             int result;
+            var pixels = (void*)memory.Pointer.Address;
 
             switch (format)
             {
